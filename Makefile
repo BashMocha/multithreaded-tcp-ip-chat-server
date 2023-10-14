@@ -9,6 +9,5 @@ server: ./src/server.c
 client: ./src/client.c
 	gcc ${INCLUDES} ./src/client.c -o ./bin/client 
 
-
 clean:
-	del ./bin*
+	rm -f ./bin/*

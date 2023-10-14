@@ -3,12 +3,13 @@
 
 int main(int argc, char **argv)
 {   
-    int server_fd, port, new_socket, valread, activitiy, socket_descriptor, max_sd, client_socket[MAX_CLIENT_NUM];
+    int server_fd, new_socket, valread, activitiy, socket_descriptor, max_sd, client_socket[MAX_CLIENT_NUM];
     char *connection_success_message = "Connected successfully.\n";
     
     struct sockaddr_in address;
     socklen_t addrlen = sizeof(address);
 
+    char port[PORT_SIZE] = {0}; // buffer for port size will be stored in
     char buffer[1025];  // data buffer of 1K  
 
     // set of socket descriptors
@@ -21,7 +22,8 @@ int main(int argc, char **argv)
     }
 
     printf("[-->]Please enter the port number for server to select:\n");
-    scanf("%d", &port);
+    fgets(port, 5, stdin);
+    setbuf(stdin, NULL);    // sets stdin stream buffer NULL 
 
     // creating a TCP socket in IP protocol
     // this is the default (master) socket
@@ -30,14 +32,14 @@ int main(int argc, char **argv)
     // set address family, IP address and port to an int variable
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;   // IP address
-    address.sin_port = htons(port);
+    address.sin_port = htons((short)strtol(port, NULL, 10));
 
     // bind socket to address and port
     bind_socket(server_fd, &address);
 
     // puts server socket in passive mode
     listen_socket(server_fd, 3);
-    printf("[+]Server is ready for clients to connect on port number %d.\n", port);
+    printf("[+]Server is ready for clients to connect on port number %d.\n", (short)strtol(port, NULL, 10));
 
     for (;;)
     {   

@@ -14,11 +14,11 @@ int main(int argc, char **argv)
     client_fd = create_and_check_socket();
 
     // char* port;
-    char port[VAL] = {0};
+    char port[PORT_SIZE] = {0}; // buffer for port size will be stored in
 
     printf("Type the port address you want to connect:");
     fgets(port, 5, stdin);
-    setbuf(stdin, NULL);
+    setbuf(stdin, NULL);    // sets stdin stream buffer NULL 
 
     struct hostent *server = gethostbyname("localhost");
 

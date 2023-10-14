@@ -13,7 +13,7 @@
 #include <netdb.h>
 
 
-#define VAL 5
+#define PORT_SIZE 5   // max size for PORT number
 #define PORT 1234
 #define MAX_CLIENT_NUM 30   // max number of socket descriptors
 #define TIMEOUT 600 // server timeout interval
