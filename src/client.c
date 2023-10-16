@@ -1,7 +1,7 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include "util.h"
-
+#include <pthread.h>
 
 int main(int argc, char **argv)
 {
@@ -60,3 +60,12 @@ int main(int argc, char **argv)
     close(client_fd);
     return 0;
 }
+
+/*
+    not sure whether there'll be changes on server
+    
+    two processes   =>  server and client
+    server          =>  single-threaded process 
+    client          =>  multi-threaded process
+                    =>  (listen and print) and (read and send) 
+*/
