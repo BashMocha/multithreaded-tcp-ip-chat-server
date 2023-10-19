@@ -1,12 +1,13 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include "util.h"
-#include <pthread.h>
+#include <fcntl.h>
 
 int main(int argc, char **argv)
 {
     int status, client_fd, valread;
     struct sockaddr_in serv_addr;
+
     char message[100];
     char buffer[1025] = {0}; // data buffer of 1K
 
@@ -18,7 +19,7 @@ int main(int argc, char **argv)
 
     printf("Type the port address you want to connect:");
     fgets(port, 5, stdin);
-    setbuf(stdin, NULL);    // sets stdin stream buffer NULL 
+    setbuf(stdin, NULL); // sets stdin stream buffer NULL
 
     struct hostent *server = gethostbyname("localhost");
 
@@ -33,10 +34,20 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
+
+    fd_set all_set, r_set;
+    int maxfd = client_fd + 1;
+    FD_ZERO(&all_set);
+    FD_SET(STDIN_FILENO, &all_set);
+    FD_SET(client_fd, &all_set);
+    r_set = all_set;
+    struct timeval tv;
+    tv.tv_sec = 2;
+    tv.tv_usec = 0;
+
+    //printf("Message: ");
     for (;;)
     {
-        // if its the first time client connects to server, gets a message from server,
-        // indicates that connection is successful
         if (first_connection)
         {
             if ((valread = read(client_fd, buffer, 1024)) != 0)
@@ -46,26 +57,33 @@ int main(int argc, char **argv)
             first_connection = false;
         }
 
-        printf("Message: ");
-        fgets(buffer, sizeof(buffer), stdin);
-        buffer[strcspn(buffer, "\n")] = 0;
-        
-        // break loop for quitting
-        if (strcmp(buffer, "quit") == 0)
-            break;
-        
-        send(client_fd, buffer, strlen(buffer) + 1, 0);
+        r_set = all_set;
+        select(maxfd, &r_set, NULL, NULL, &tv);
+
+        if (FD_ISSET(STDIN_FILENO, &r_set))
+        {
+            //printf("Message: ");
+            fgets(buffer, sizeof(buffer), stdin);
+            buffer[strcspn(buffer, "\n")] = 0;
+
+            // break loop for quitting
+            if (strcmp(buffer, "quit") == 0)
+                break;
+
+            send(client_fd, buffer, strlen(buffer) + 1, 0);
+        }
+
+        // if smth occurs on default socket, accept and create new socket
+        if (FD_ISSET(client_fd, &r_set))
+        {
+            if ((valread = read(client_fd, buffer, 1024)) != 0)
+            {   
+                printf("%s\n", buffer);
+            }
+        }
+
     }
 
     close(client_fd);
     return 0;
 }
-
-/*
-    not sure whether there'll be changes on server
-    
-    two processes   =>  server and client
-    server          =>  single-threaded process 
-    client          =>  multi-threaded process
-                    =>  (listen and print) and (read and send) 
-*/
