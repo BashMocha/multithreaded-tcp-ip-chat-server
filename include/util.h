@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include <errno.h>
 #include <sys/socket.h>
 #include <sys/select.h>
@@ -14,32 +15,27 @@
 #include <stdint.h>
 #include <pthread.h>
 
+#define PORT_SIZE 5           // max size for PORT number
+#define MAX_CLIENT_NUM 10     // max number of socket descriptors
+#define TIMEOUT 600           // server timeout interval
+#define BUFF_SIZE 1024        // 1K size of buffer
+#define h_addr h_addr_list[0] // for backward compatibility
 
-#define PORT_SIZE 5   // max size for PORT number
-#define PORT 1234
-#define MAX_CLIENT_NUM 30   // max number of socket descriptors
-#define TIMEOUT 600 // server timeout interval
+struct timeval tv = {TIMEOUT, 0}; // sleep for 10 minutes
 
-#define h_addr h_addr_list[0] // for backward compatibility 
+static bool terminated = false;
+pthread_t tmp_thread;
 
-struct timeval tv = {TIMEOUT, 0};   // sleep for 10 minutes
-typedef struct thread_params {
-    char *buffer;
-    int fd;
-} thread_params;
-
-void read_and_send_thread(int fd, char *buffer);
-void listen_and_print_thread(int fd);
-void *read_and_send(void *vargp);
-void *listen_and_print(void *vargp);
-
+pthread_t message_read_thread(int fd);
+pthread_t message_send_thread(int fd);
+void *message_read(void *vargp);
+void *message_send(void *vargp);
 int create_and_check_socket();
 int bind_socket(int sockfd, struct sockaddr_in *address);
 int listen_socket(int server_fd, int backlog);
 int accept_new_socket(int server_fd, struct sockaddr_in *address, socklen_t *addrlen);
 
-pthread_mutex_t mutex;
-
+// creates and checks creation process
 int create_and_check_socket()
 {
     int server_fd;
@@ -51,15 +47,17 @@ int create_and_check_socket()
     return server_fd;
 }
 
+// binds socket and checks bind process
 int bind_socket(int server_fd, struct sockaddr_in *address)
-{   
-   if (bind(server_fd, (struct sockaddr *)address, sizeof(*address)) < 0)
-   {
+{
+    if (bind(server_fd, (struct sockaddr *)address, sizeof(*address)) < 0)
+    {
         perror("Bind failed.\n");
         exit(EXIT_FAILURE);
-   }
+    }
 }
 
+// prepare to accept connections from given socket FD
 int listen_socket(int server_fd, int backlog)
 {
     if (listen(server_fd, backlog) < 0)
@@ -69,8 +67,9 @@ int listen_socket(int server_fd, int backlog)
     }
 }
 
+// await a conection on socket FD and opens a new socket to communicate with it
 int accept_new_socket(int server_fd, struct sockaddr_in *address, socklen_t *addrlen)
-{   
+{
     int new_socket;
 
     if ((new_socket = accept(server_fd, (struct sockaddr *)address, addrlen)) < 0)
@@ -81,66 +80,95 @@ int accept_new_socket(int server_fd, struct sockaddr_in *address, socklen_t *add
     return new_socket;
 }
 
-
-void read_and_send_thread(int fd, char *buffer)
-{
-    thread_params args;
-    args.fd = fd;
-    args.buffer = buffer;
-    
-    pthread_t id;
-    pthread_create(&id, NULL, read_and_send, (void *)&args);
-    //pthread_create(&id, NULL, read_and_send, (void *)(intptr_t)fd);
-}
-
-void listen_and_print_thread(int fd)
+// creates thread for read process and returns thread id
+pthread_t message_read_thread(int fd)
 {
     pthread_t id;
-    pthread_create(&id, NULL, listen_and_print, (void *)(intptr_t)fd);
-    //pthread_create(&id, NULL, listen_and_print, (void *)(intptr_t)fd);
+    pthread_create(&id, NULL, message_read, (void *)(intptr_t)fd);
+
+    return id;
 }
 
-// int fd, char *buffer
-void *read_and_send(void *vargp)
+// creates thread for send process and returns thread id
+pthread_t message_send_thread(int fd)
 {
-    struct thread_params *args = vargp;
-    
-    for (;;)
-    {
-        pthread_mutex_lock(&mutex);
-        printf("Message: ");
-        fgets(args->buffer, sizeof(args->buffer), stdin);
-        args->buffer[strcspn(args->buffer, "\n")] = 0;
+    pthread_t id;
+    pthread_create(&id, NULL, message_send, (void *)(intptr_t)fd);
 
-        // break loop for quitting
-        if (strcmp(args->buffer, "quit") == 0)
-            break;
-
-        send(args->fd, args->buffer, strlen(args->buffer) + 1, 0);
-        //sleep(2);
-        pthread_mutex_unlock(&mutex);
-    }
+    return id;
 }
 
-void *listen_and_print(void *vargp)
+// read 1K size of message from socket FD with a thread
+void *message_read(void *vargp)
 {
-    int fd = (intptr_t)vargp;
-    char buffer[1025];
-    int valread;
-    long int localA = 0;
+    bool disconnect = false;
+    bool first_connection = true;
+    intptr_t fd = (intptr_t)vargp;
+    char buffer[BUFF_SIZE];
+    int message_size = 0;
 
-    for (;;)
+    tmp_thread = pthread_self();
+
+    while (!disconnect)
     {
-        //pthread_mutex_init
-        pthread_mutex_lock(&mutex);
-        if ((valread = read(fd, buffer, 1024)) != 0)
+        if (first_connection)
         {
-            printf("Client[%d]: %s\n", fd - 3, buffer);
+            if (recv(fd, buffer, BUFF_SIZE, 0) != 0)
+            {
+                printf("%s", buffer);
+            }
+            first_connection = false;
         }
-        //sleep(2);
-        pthread_mutex_unlock(&mutex);
+
+        message_size = recv(fd, buffer, BUFF_SIZE, 0);
+        if (message_size > 0)
+        {
+            printf("%s\n", buffer);
+        }
+        buffer[message_size] = 0; // set buffer empty
     }
-    close(fd);
+}
+
+// send 1K size of message to socket FD with a thread, and terminates both threads
+void *message_send(void *vargp)
+{
+    bool disconnect = false;
+    char buffer[BUFF_SIZE];
+    int message_size = 0;
+    intptr_t fd = (intptr_t)vargp;
+
+    while (!disconnect)
+    {
+        fgets(buffer, sizeof(buffer), stdin);
+        buffer[strcspn(buffer, "\n")] = 0;
+        if (strcmp(buffer, "quit") == 0)
+        {
+            terminated = true;
+            break;
+        }
+
+        if (send(fd, buffer, strlen(buffer) + 1, 0) < 0)
+        {
+            printf("Server probably down.\n");
+            disconnect = true;
+        }
+    }
+    // if 'quit' is typed, terminate read-thread and then terminate send-thread
+    pthread_cancel(tmp_thread);
+    pthread_cancel(pthread_self());
+}
+
+// takes socket FD, converts to string and appends,
+// when server gets a message, it redirects message to other clients with sender's socket FD at the end of the message
+void send_other_client(char *buffer, int sender_fd, int receiver_fd)
+{
+    char num[12];
+    char temp_arr[1025] = "Client[ ]: ";
+
+    sprintf(num, "%d", sender_fd - 4);
+    *(temp_arr + 7) = *(num + 0);
+    strcat(temp_arr, buffer);
+    send(receiver_fd, temp_arr, strlen(temp_arr) + 1, 0);
 }
 
 #endif
