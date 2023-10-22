@@ -1,14 +1,14 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include "util.h"
-
+#include <pthread.h>
 
 int main(int argc, char **argv)
 {
     int status, client_fd, valread;
     struct sockaddr_in serv_addr;
     char message[100];
-    char buffer[1025] = {0}; // data buffer of 1K
+    char buffer[BUFF_SIZE] = {0}; // data buffer of 1K
 
     bool first_connection = true;
     client_fd = create_and_check_socket();
@@ -16,9 +16,9 @@ int main(int argc, char **argv)
     // char* port;
     char port[PORT_SIZE] = {0}; // buffer for port size will be stored in
 
-    printf("Type the port address you want to connect:");
+    printf("[-->]Type the port address you want to connect:");
     fgets(port, 5, stdin);
-    setbuf(stdin, NULL);    // sets stdin stream buffer NULL 
+    setbuf(stdin, NULL); // sets stdin stream buffer NULL
 
     struct hostent *server = gethostbyname("localhost");
 
@@ -33,29 +33,10 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    for (;;)
-    {
-        // if its the first time client connects to server, gets a message from server,
-        // indicates that connection is successful
-        if (first_connection)
-        {
-            if ((valread = read(client_fd, buffer, 1024)) != 0)
-            {
-                printf("%s", buffer);
-            }
-            first_connection = false;
-        }
-
-        printf("Message: ");
-        fgets(buffer, sizeof(buffer), stdin);
-        buffer[strcspn(buffer, "\n")] = 0;
-        
-        // break loop for quitting
-        if (strcmp(buffer, "quit") == 0)
-            break;
-        
-        send(client_fd, buffer, strlen(buffer) + 1, 0);
-    }
+    pthread_t id_read = message_read_thread(client_fd);
+    pthread_t id_send = message_send_thread(client_fd);
+    pthread_join(id_read, 0);
+    pthread_join(id_send, 0);
 
     close(client_fd);
     return 0;
