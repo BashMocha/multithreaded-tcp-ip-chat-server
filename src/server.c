@@ -24,7 +24,8 @@ int main(int argc, char **argv)
     printf("[-->]Please enter the port number for server to select:\n");
     fgets(port, 5, stdin);
     setbuf(stdin, NULL); // sets stdin stream buffer NULL
-
+    create_db();
+    insert_db();
     // creating a TCP socket in IP protocol
     // this is the default (master) socket
     server_fd = create_and_check_socket();
@@ -142,3 +143,25 @@ int main(int argc, char **argv)
     shutdown(server_fd, SHUT_RDWR);
     return 0;
 }
+
+/*
+    Management of questions and answers:
+    The component supports 3 different commands: "ASK", "ANSWER", "LISTQUESTIONS":
+    (use SQLite in order to provide data persistency)
+    
+    ASK ...
+    ANSWER ...
+    LISTQUESTIONS ...
+
+    client 0:
+    ASK who was the first king of Portugal?
+    
+    ANSWER 1: Afonso Henriques
+
+    ----
+
+    client 1:
+    ASK 1: who was the first king of Portugal?
+    ANSWER Afonso Henriques
+
+*/

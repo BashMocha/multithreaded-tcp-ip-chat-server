@@ -14,6 +14,7 @@
 #include <netdb.h>
 #include <stdint.h>
 #include <pthread.h>
+#include <sqlite3.h>
 
 #define PORT_SIZE 5           // max size for PORT number
 #define MAX_CLIENT_NUM 10     // max number of socket descriptors
@@ -34,6 +35,9 @@ int create_and_check_socket();
 int bind_socket(int sockfd, struct sockaddr_in *address);
 int listen_socket(int server_fd, int backlog);
 int accept_new_socket(int server_fd, struct sockaddr_in *address, socklen_t *addrlen);
+
+void create_db();
+void insert_db();
 
 // creates and checks creation process
 int create_and_check_socket()
@@ -169,6 +173,75 @@ void send_other_client(char *buffer, int sender_fd, int receiver_fd)
     *(temp_arr + 7) = *(num + 0);
     strcat(temp_arr, buffer);
     send(receiver_fd, temp_arr, strlen(temp_arr) + 1, 0);
+}
+
+void create_db()
+{
+    sqlite3 *db;
+    int rc = sqlite3_open("test.db", &db);
+    char *sql1;
+    int temp;
+    char *zErrMsg = 0;
+
+    if (rc)
+    {
+        fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
+    }
+    else
+    {
+        fprintf(stderr, "Opened database successfully\n");
+    }
+
+    sql1 = "CREATE TABLE QUESTIONS("
+           "ID INTEGER PRIMARY KEY      AUTOINCREMENT,"
+           "QUESTION TEXT           NOT NULL,"
+           "ANSWER TEXT             NOT NULL);";
+
+    rc = sqlite3_exec(db, sql1, NULL, 0, &zErrMsg);
+
+    if (rc != SQLITE_OK)
+    {
+        fprintf(stderr, "SQL error: %s\n", zErrMsg);
+        sqlite3_free(zErrMsg);
+    }
+    else
+    {
+        fprintf(stdout, "Table created successfully\n");
+    }
+    sqlite3_close(db);
+}
+
+void insert_db()
+{
+    sqlite3 *db;
+    int rc = sqlite3_open("test.db", &db);
+    char *sql1;
+    char *zErrMsg = 0;
+
+    if (rc)
+    {
+        fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
+    }
+    else
+    {
+        fprintf(stderr, "Opened database successfully\n");
+    }
+
+    sql1 = "INSERT INTO QUESTIONS (ID, QUESTION, ANSWER) "
+           "VALUES (1, 'Who is the first king of Portugal?', 'First Joao');";
+
+    rc = sqlite3_exec(db, sql1, NULL, 0, &zErrMsg);
+
+    if (rc != SQLITE_OK)
+    {
+        fprintf(stderr, "SQL error: %s\n", zErrMsg);
+        sqlite3_free(zErrMsg);
+    }
+    else
+    {
+        fprintf(stdout, "Records created successfully\n");
+    }
+    sqlite3_close(db);
 }
 
 #endif
