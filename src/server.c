@@ -3,8 +3,8 @@
 
 int main(int argc, char **argv)
 {
-    int server_fd, new_socket, valread, activitiy, socket_descriptor, max_sd, client_socket[MAX_CLIENT_NUM];
-    char *connection_success_message = "[+]Connected successfully (type 'quit').\n";
+    int server_fd, new_socket, valread, activitiy, socket_descriptor, max_sd, client_socket[MAX_CLIENT_NUM], questions;
+    char *connection_success_message = "[+]Connected successfully (type 'quit' or 'help').\n";
 
     struct sockaddr_in address;
     socklen_t addrlen = sizeof(address);
@@ -24,8 +24,7 @@ int main(int argc, char **argv)
     printf("[-->]Please enter the port number for server to select:\n");
     fgets(port, 5, stdin);
     setbuf(stdin, NULL); // sets stdin stream buffer NULL
-    create_db();
-    insert_db();
+
     // creating a TCP socket in IP protocol
     // this is the default (master) socket
     server_fd = create_and_check_socket();
@@ -41,7 +40,10 @@ int main(int argc, char **argv)
     // puts server socket in passive mode
     listen_socket(server_fd, 3);
     printf("[+]Server is ready for clients to connect on port number %d.\n", (short)strtol(port, NULL, 10));
-
+    
+    questions = 0;
+    create_db();
+    
     for (;;)
     {
         // clear the socket set
@@ -107,6 +109,8 @@ int main(int argc, char **argv)
 
         for (int i = 0; i < MAX_CLIENT_NUM; i++)
         {
+            // setbuf(stdin, NULL); // sets stdin stream buffer NULL
+            buffer[BUFF_SIZE] = 0;
             socket_descriptor = client_socket[i];
 
             if (FD_ISSET(socket_descriptor, &readfds))
@@ -115,14 +119,76 @@ int main(int argc, char **argv)
                 // if ((valread = read(socket_descriptor, buffer, 1024)) != 0)
                 if ((valread = recv(socket_descriptor, buffer, BUFF_SIZE, 0)) != 0)
                 {
-                    printf("Client[%d]: %s\n", socket_descriptor - 4, buffer);
-                    // send(socket_descriptor , buffer, strlen(buffer) + 1, 0 );
+                    int key = 0;
+                    // ASK
+                    if (strncmp(buffer, commands[0], strlen(commands[0])) == 0)
+                    {
+                        key = 1;
+                        questions += 1;
+
+                        char question_str[50] = "QUESTION ";
+                        char num[12];
+                        sprintf(num, "%d", questions);
+
+                        size_t len = strlen(buffer);
+                        size_t command_len = strlen(commands[0]);
+                        memmove(buffer, buffer + command_len, len - command_len + 1);
+                        ask_db(buffer);
+
+                        //printf("buffer before=> %s\n", buffer);
+                        strcat(question_str, num);
+                        strcat(question_str, ": ");
+                        strcat(question_str, buffer);
+                        strcpy(buffer, question_str);
+                        //printf("buffer after=> %s\n", buffer);
+                    }
+                    // ANSWER
+                    else if (strncmp(buffer, commands[1], strlen(commands[1])) == 0)
+                    {
+                        key = 2;
+                        size_t len = strlen(buffer);
+                        size_t command_len = strlen(commands[1]);
+
+                        char answer_str[10] = "ANSWER ";
+                        char num = buffer[8];
+
+                        memmove(buffer, buffer + command_len + 2, len - command_len + 1);
+                        answer_db(buffer, num);
+
+                        strncat(answer_str, &num, 1);
+                        strcat(answer_str, ": ");
+                        strcat(answer_str, buffer);
+                        strcpy(buffer, answer_str);
+                    }
+                    // LISTQUESTIONS
+                    else if (strncmp(buffer, commands[2], strlen(commands[2])) == 0)
+                    {
+                        listquestions_db(buffer, questions);
+                        send(socket_descriptor, buffer, strlen(buffer) + 1, 0);
+                        continue;
+                    }
+
+                    if (key != 0)
+                    {
+                        printf("%s\n", buffer);
+                    }
+                    else
+                    {
+                        printf("Client[%d]: %s\n", socket_descriptor - 4, buffer);
+                    }
 
                     for (int j = 0; j < MAX_CLIENT_NUM; j++)
                     {
                         if (client_socket[j] != socket_descriptor)
                         {
-                            send_other_client(buffer, socket_descriptor, client_socket[j]);
+                            if (key != 0)
+                            {
+                                send(client_socket[j], buffer, strlen(buffer) + 1, 0);
+                            }
+                            else
+                            {
+                                send_other_client(buffer, socket_descriptor, client_socket[j]);
+                            }
                         }
                     }
                 }
@@ -143,25 +209,3 @@ int main(int argc, char **argv)
     shutdown(server_fd, SHUT_RDWR);
     return 0;
 }
-
-/*
-    Management of questions and answers:
-    The component supports 3 different commands: "ASK", "ANSWER", "LISTQUESTIONS":
-    (use SQLite in order to provide data persistency)
-    
-    ASK ...
-    ANSWER ...
-    LISTQUESTIONS ...
-
-    client 0:
-    ASK who was the first king of Portugal?
-    
-    ANSWER 1: Afonso Henriques
-
-    ----
-
-    client 1:
-    ASK 1: who was the first king of Portugal?
-    ANSWER Afonso Henriques
-
-*/

@@ -21,11 +21,13 @@
 #define TIMEOUT 600           // server timeout interval
 #define BUFF_SIZE 1024        // 1K size of buffer
 #define h_addr h_addr_list[0] // for backward compatibility
+#define SERVER_DB "SERVER.db" // server. db file
 
 struct timeval tv = {TIMEOUT, 0}; // sleep for 10 minutes
 
 static bool terminated = false;
 pthread_t tmp_thread;
+char commands[3][15] = {"ASK ", "ANSWER -", "LISTQUESTIONS"};
 
 pthread_t message_read_thread(int fd);
 pthread_t message_send_thread(int fd);
@@ -37,7 +39,9 @@ int listen_socket(int server_fd, int backlog);
 int accept_new_socket(int server_fd, struct sockaddr_in *address, socklen_t *addrlen);
 
 void create_db();
-void insert_db();
+void ask_db(char *buffer);
+void answer_db(char *buffer, char id);
+void listquestions_db(char *buffer, int questions);
 
 // creates and checks creation process
 int create_and_check_socket()
@@ -150,6 +154,11 @@ void *message_send(void *vargp)
             terminated = true;
             break;
         }
+        else if (strcmp(buffer, "help") == 0)
+        {
+            printf("use 'ASK ...' for questions.\nuse 'ANSWER -{id} ...' for answer a question.\nuse 'LISTQUESTIONS' for listing all questions.\n");
+            continue;
+        }
 
         if (send(fd, buffer, strlen(buffer) + 1, 0) < 0)
         {
@@ -178,10 +187,10 @@ void send_other_client(char *buffer, int sender_fd, int receiver_fd)
 void create_db()
 {
     sqlite3 *db;
-    int rc = sqlite3_open("test.db", &db);
+    int rc = sqlite3_open("SERVER.db", &db);
     char *sql1;
     int temp;
-    char *zErrMsg = 0;
+    char *ErrMsg = 0;
 
     if (rc)
     {
@@ -193,16 +202,16 @@ void create_db()
     }
 
     sql1 = "CREATE TABLE QUESTIONS("
-           "ID INTEGER PRIMARY KEY      AUTOINCREMENT,"
-           "QUESTION TEXT           NOT NULL,"
-           "ANSWER TEXT             NOT NULL);";
+           "ID INTEGER PRIMARY KEY,"
+           "QUESTION TEXT               NOT NULL,"
+           "ANSWER TEXT                 DEFAULT '');";
 
-    rc = sqlite3_exec(db, sql1, NULL, 0, &zErrMsg);
+    rc = sqlite3_exec(db, sql1, NULL, 0, &ErrMsg);
 
     if (rc != SQLITE_OK)
     {
-        fprintf(stderr, "SQL error: %s\n", zErrMsg);
-        sqlite3_free(zErrMsg);
+        fprintf(stderr, "SQL error: %s\n", ErrMsg);
+        sqlite3_free(ErrMsg);
     }
     else
     {
@@ -211,36 +220,89 @@ void create_db()
     sqlite3_close(db);
 }
 
-void insert_db()
+void ask_db(char *buffer)
 {
     sqlite3 *db;
-    int rc = sqlite3_open("test.db", &db);
+    int rc = sqlite3_open(SERVER_DB, &db);
     char *sql1;
-    char *zErrMsg = 0;
+    char *ErrMsg = 0;
 
     if (rc)
     {
         fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
     }
-    else
-    {
-        fprintf(stderr, "Opened database successfully\n");
-    }
 
-    sql1 = "INSERT INTO QUESTIONS (ID, QUESTION, ANSWER) "
-           "VALUES (1, 'Who is the first king of Portugal?', 'First Joao');";
-
-    rc = sqlite3_exec(db, sql1, NULL, 0, &zErrMsg);
+    sql1 = sqlite3_mprintf("INSERT INTO QUESTIONS (QUESTION, ANSWER) VALUES('%s', '%s')", buffer, "NOTANSWERED");
+    rc = sqlite3_exec(db, sql1, NULL, 0, &ErrMsg);
 
     if (rc != SQLITE_OK)
     {
-        fprintf(stderr, "SQL error: %s\n", zErrMsg);
-        sqlite3_free(zErrMsg);
+        fprintf(stderr, "SQL error: %s\n", ErrMsg);
+        sqlite3_free(ErrMsg);
     }
-    else
+    sqlite3_close(db);
+}
+
+void answer_db(char *buffer, char c)
+{
+    sqlite3 *db;
+    int rc = sqlite3_open(SERVER_DB, &db);
+    char *sql1;
+    char *ErrMsg = 0;
+    int id = c - '0';
+
+    if (rc)
     {
-        fprintf(stdout, "Records created successfully\n");
+        fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
     }
+    sql1 = sqlite3_mprintf("UPDATE QUESTIONS SET ANSWER='%s' WHERE id= '%d'", buffer, id);
+
+    rc = sqlite3_exec(db, sql1, NULL, 0, &ErrMsg);
+
+    if (rc != SQLITE_OK)
+    {
+        fprintf(stderr, "SQL error: %s\n", ErrMsg);
+        sqlite3_free(ErrMsg);
+    }
+
+    // free(answer);
+    sqlite3_close(db);
+}
+
+void listquestions_db(char *buffer, int questions)
+{
+    sqlite3 *db;
+    sqlite3_stmt *res;
+    sqlite3_stmt *stmt;
+
+    int rc = sqlite3_open(SERVER_DB, &db);
+    int count = 0;
+    char *sql1;
+    const char *tail;
+    char *ErrMsg = 0;
+
+    if (rc)
+    {
+        fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
+    }
+    if (sqlite3_prepare_v2(db, "SELECT QUESTION,ANSWER FROM QUESTIONS", 128, &res, &tail) != SQLITE_OK)
+    {
+        printf("Can't retrieve data: %s\n", sqlite3_errmsg(db));
+    }
+
+    size_t len = strlen(buffer);
+    size_t command_len = strlen("LISTQUESTIONS");
+    memmove(buffer, buffer + command_len, len - command_len + 1);
+    while (sqlite3_step(res) == SQLITE_ROW)
+    {
+        count += 1;
+        char *temp_q = (char *)malloc(100 * sizeof(char));
+        sprintf(temp_q, "\n(%d) %s\n    %s\n", count, sqlite3_column_text(res, 0), sqlite3_column_text(res, 1));
+        strcat(buffer, temp_q);
+        free(temp_q);
+    }
+    strcat(buffer, "\nENDQUESTIONS\n");
+    sqlite3_finalize(res);
     sqlite3_close(db);
 }
 
