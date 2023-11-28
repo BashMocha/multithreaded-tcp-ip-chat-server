@@ -5,6 +5,7 @@
         "stdint.h": "c",
         "inet.h": "c",
         "pthread.h": "c",
-        "select.h": "c"
+        "select.h": "c",
+        "math.h": "c"
     }
 }

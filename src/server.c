@@ -10,9 +10,8 @@ int main(int argc, char **argv)
     socklen_t addrlen = sizeof(address);
 
     char port[PORT_SIZE] = {0}; // buffer for port size will be stored in
-    char buffer[BUFF_SIZE];     // data buffer of 1K
+    char buffer[BUFF_SIZE];
 
-    // set of socket descriptors
     fd_set readfds;
 
     // initialize all client_socket[] to 0
@@ -25,8 +24,6 @@ int main(int argc, char **argv)
     fgets(port, 5, stdin);
     setbuf(stdin, NULL); // sets stdin stream buffer NULL
 
-    // creating a TCP socket in IP protocol
-    // this is the default (master) socket
     server_fd = create_and_check_socket();
 
     // set address family, IP address and port to an int variable
@@ -34,16 +31,15 @@ int main(int argc, char **argv)
     address.sin_addr.s_addr = INADDR_ANY; // IP address
     address.sin_port = htons((short)strtol(port, NULL, 10));
 
-    // bind socket to address and port
     bind_socket(server_fd, &address);
 
     // puts server socket in passive mode
     listen_socket(server_fd, 3);
     printf("[+]Server is ready for clients to connect on port number %d.\n", (short)strtol(port, NULL, 10));
-    
+
     questions = 0;
     create_db();
-    
+
     for (;;)
     {
         // clear the socket set
@@ -135,12 +131,10 @@ int main(int argc, char **argv)
                         memmove(buffer, buffer + command_len, len - command_len + 1);
                         ask_db(buffer);
 
-                        //printf("buffer before=> %s\n", buffer);
                         strcat(question_str, num);
                         strcat(question_str, ": ");
                         strcat(question_str, buffer);
                         strcpy(buffer, question_str);
-                        //printf("buffer after=> %s\n", buffer);
                     }
                     // ANSWER
                     else if (strncmp(buffer, commands[1], strlen(commands[1])) == 0)
@@ -164,6 +158,58 @@ int main(int argc, char **argv)
                     else if (strncmp(buffer, commands[2], strlen(commands[2])) == 0)
                     {
                         listquestions_db(buffer, questions);
+                        send(socket_descriptor, buffer, strlen(buffer) + 1, 0);
+                        continue;
+                    }
+                    // PUTFILE
+                    else if (strncmp(buffer, commands[3], strlen(commands[3])) == 0)
+                    {
+                        char path[BUFF_SIZE];
+                        char temp_filename[BUFF_SIZE];
+                        const char seperator = ' ';
+                        char *filename = strchr(buffer, seperator);
+                        *filename = '\0';
+
+                        strcpy(temp_filename, filename + 1);
+                        strcpy(path, "./remote/");
+                        strcat(path, filename + 1);
+                        receive_file(socket_descriptor, path, path);
+                        
+                        putfile_db(temp_filename);
+                        continue;
+                    }
+                    // GETFILE
+                    else if (strncmp(buffer, commands[4], strlen(commands[4])) == 0)
+                    {
+                        // send(socket_descriptor, buffer, strlen(buffer) + 1, 0);
+                        char path[BUFF_SIZE];
+                        char temp[BUFF_SIZE];
+                        strcpy(temp, buffer);
+
+                        const char seperator = ' ';
+                        char *filename = strchr(buffer, seperator);
+                        *filename = '\0';
+                        strcpy(path, "./remote/");
+                        strcat(path, filename + 1);
+
+                        if (!file_exists(path))
+                        {
+                            send(socket_descriptor, "File not found.", strlen("File not found.") + 1, 0);
+                            continue;
+                        }
+                        else
+                        {
+                            send(socket_descriptor, temp, strlen(temp) + 1, 0);
+                        }
+
+                        send_file(socket_descriptor, path, path);
+                        continue;
+                    }
+                    // LISTFILES
+                    else if (strncmp(buffer, commands[5], strlen(commands[5])) == 0)
+                    {
+                        //char buffer[BUFF_SIZE];
+                        listfiles_db(buffer);
                         send(socket_descriptor, buffer, strlen(buffer) + 1, 0);
                         continue;
                     }
@@ -209,3 +255,27 @@ int main(int argc, char **argv)
     shutdown(server_fd, SHUT_RDWR);
     return 0;
 }
+
+/*
+    File Management:
+    => PUTFILE, LISTFILES, GETFILE
+    a new table will be needed for this stage, called FILES
+    | id | file_name |
+
+    PUTFILE cv.pdf 2780 => upload files to the server, (byte option must be tested) [FINISHED]
+    LISTFILES => lists uploaded files, (works same as LISTQUESTIONS)
+    GETFILE -{id} => downloads a file from server
+*/
+
+/*
+    TODO:
+        BUG =>
+        fix '' usage in when asking questions
+
+        add constants for array sizes
+        delete unnecessery comments and iff add comment if it's necessery
+
+        learn more about file transfer and make it without exceeding 1024KB packet size
+            => so if a file is larger than the packet, multiple packets should be sent
+        try edge cases for PUTFILE command
+*/

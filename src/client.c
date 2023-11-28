@@ -7,7 +7,7 @@ int main(int argc, char **argv)
 {
     int status, client_fd, valread;
     struct sockaddr_in serv_addr;
-    char message[100];
+    //char message[100];
     char buffer[BUFF_SIZE] = {0}; // data buffer of 1K
 
     bool first_connection = true;
