@@ -1,5 +1,11 @@
 {
     "files.associations": {
-        "netdb.h": "c"
+        "netdb.h": "c",
+        "sqlite3.h": "c",
+        "stdint.h": "c",
+        "inet.h": "c",
+        "pthread.h": "c",
+        "select.h": "c",
+        "math.h": "c"
     }
 }
