@@ -5,6 +5,8 @@ int main(int argc, char **argv)
 {
     int server_fd, new_socket, valread, activitiy, socket_descriptor, max_sd, client_socket[MAX_CLIENT_NUM], questions;
     char *connection_success_message = "[+]Connected successfully (type 'quit' or 'help').\n";
+    char client_name[NAME_SIZE];
+    bool flag;
 
     struct sockaddr_in address;
     socklen_t addrlen = sizeof(address);
@@ -20,7 +22,7 @@ int main(int argc, char **argv)
         client_socket[i] = 0;
     }
 
-    printf("[-->]Please enter the port number for server to select:\n");
+    printf("[-->]Please enter the port number for server to select:");
     fgets(port, 5, stdin);
     setbuf(stdin, NULL); // sets stdin stream buffer NULL
 
@@ -84,6 +86,8 @@ int main(int argc, char **argv)
             // accepts the first connection request, creates new socket and, the connection is established between server and client
             new_socket = accept_new_socket(server_fd, &address, &addrlen);
             printf("[-->]New connection, socket_fd: %d, IP: %s, port: %d.\n", new_socket, inet_ntoa(address.sin_addr), ntohs(address.sin_port));
+            recv(new_socket, client_name, sizeof(client_name), 0);
+            registered_db(client_name, ntohs(address.sin_port), 0);
 
             // send an connection message that indicates connection is successful to client
             if (send(new_socket, connection_success_message, strlen(connection_success_message) + 1, 0) != strlen(connection_success_message) + 1)
@@ -105,21 +109,24 @@ int main(int argc, char **argv)
 
         for (int i = 0; i < MAX_CLIENT_NUM; i++)
         {
-            // setbuf(stdin, NULL); // sets stdin stream buffer NULL
             buffer[BUFF_SIZE] = 0;
             socket_descriptor = client_socket[i];
 
             if (FD_ISSET(socket_descriptor, &readfds))
             {
-                // check if socket is not disconnected, else disconnected
-                // if ((valread = read(socket_descriptor, buffer, 1024)) != 0)
+                getpeername(socket_descriptor, (struct sockaddr *)&address, (socklen_t *)&addrlen);
+
+                //  check if socket is disconnected, else disconnected
                 if ((valread = recv(socket_descriptor, buffer, BUFF_SIZE, 0)) != 0)
                 {
-                    int key = 0;
-                    // ASK
+                    // print client message if it's true
+                    // else print answer and question commands
+                    flag = false;
+
+                    // ASK command
                     if (strncmp(buffer, commands[0], strlen(commands[0])) == 0)
                     {
-                        key = 1;
+                        flag = true;
                         questions += 1;
 
                         char question_str[50] = "QUESTION ";
@@ -136,10 +143,10 @@ int main(int argc, char **argv)
                         strcat(question_str, buffer);
                         strcpy(buffer, question_str);
                     }
-                    // ANSWER
+                    // ANSWER command
                     else if (strncmp(buffer, commands[1], strlen(commands[1])) == 0)
                     {
-                        key = 2;
+                        flag = true;
                         size_t len = strlen(buffer);
                         size_t command_len = strlen(commands[1]);
 
@@ -154,16 +161,17 @@ int main(int argc, char **argv)
                         strcat(answer_str, buffer);
                         strcpy(buffer, answer_str);
                     }
-                    // LISTQUESTIONS
+                    // LISTQUESTIONS command
                     else if (strncmp(buffer, commands[2], strlen(commands[2])) == 0)
                     {
-                        listquestions_db(buffer, questions);
+                        listquestions_db(buffer);
                         send(socket_descriptor, buffer, strlen(buffer) + 1, 0);
                         continue;
                     }
-                    // PUTFILE
+                    // PUTFILE command
                     else if (strncmp(buffer, commands[3], strlen(commands[3])) == 0)
                     {
+                        int check;
                         char path[BUFF_SIZE];
                         char temp_filename[BUFF_SIZE];
                         const char seperator = ' ';
@@ -173,18 +181,27 @@ int main(int argc, char **argv)
                         strcpy(temp_filename, filename + 1);
                         strcpy(path, "./remote/");
                         strcat(path, filename + 1);
-                        receive_file(socket_descriptor, path, path);
-                        
-                        putfile_db(temp_filename);
+
+                        check = receive_file(socket_descriptor, path);
+
+                        if (check == -1)
+                        {
+                            printf("File could not received.\n");
+                        }
+                        else
+                        {
+                            putfile_db(temp_filename);
+                        }
+
                         continue;
                     }
-                    // GETFILE
+                    // GETFILE command
                     else if (strncmp(buffer, commands[4], strlen(commands[4])) == 0)
                     {
-                        // send(socket_descriptor, buffer, strlen(buffer) + 1, 0);
+                        int check;
                         char path[BUFF_SIZE];
-                        char temp[BUFF_SIZE];
-                        strcpy(temp, buffer);
+                        char temp_buffer[BUFF_SIZE];
+                        strcpy(temp_buffer, buffer);
 
                         const char seperator = ' ';
                         char *filename = strchr(buffer, seperator);
@@ -199,51 +216,73 @@ int main(int argc, char **argv)
                         }
                         else
                         {
-                            send(socket_descriptor, temp, strlen(temp) + 1, 0);
+                            send(socket_descriptor, temp_buffer, strlen(temp_buffer) + 1, 0);
                         }
 
-                        send_file(socket_descriptor, path, path);
+                        check = send_file(socket_descriptor, path);
+                        if (check == -1)
+                        {
+                            printf("File could not send.\n");
+                        }
+
                         continue;
                     }
-                    // LISTFILES
+                    // LISTFILES command
                     else if (strncmp(buffer, commands[5], strlen(commands[5])) == 0)
                     {
-                        //char buffer[BUFF_SIZE];
                         listfiles_db(buffer);
                         send(socket_descriptor, buffer, strlen(buffer) + 1, 0);
                         continue;
                     }
+                    // LISTUSERS command
+                    else if (strncmp(buffer, commands[6], strlen(commands[6])) == 0)
+                    {
+                        listusers_db(buffer);
+                        send(socket_descriptor, buffer, strlen(buffer) + 1, 0);
+                        continue;
+                    }
 
-                    if (key != 0)
+                    char *client_name = get_client_name(ntohs(address.sin_port));
+                    client_name = get_client_name(ntohs(address.sin_port));
+
+                    // print QUESTION and ANSWER
+                    if (flag)
                     {
                         printf("%s\n", buffer);
                     }
+                    // print client message
                     else
                     {
-                        printf("Client[%d]: %s\n", socket_descriptor - 4, buffer);
+                        printf("%s: %s\n", client_name, buffer);
                     }
 
                     for (int j = 0; j < MAX_CLIENT_NUM; j++)
                     {
                         if (client_socket[j] != socket_descriptor)
                         {
-                            if (key != 0)
+                            // send question and answer
+                            if (flag)
                             {
                                 send(client_socket[j], buffer, strlen(buffer) + 1, 0);
                             }
+                            // broadcast client message
                             else
                             {
-                                send_other_client(buffer, socket_descriptor, client_socket[j]);
+                                char temp_name[NAME_SIZE];
+                                strcpy(temp_name, client_name);
+                                strcat(temp_name, ": ");
+                                strcat(temp_name, buffer);
+                                send(client_socket[j], temp_name, strlen(temp_name) + 1, 0);
                             }
                         }
                     }
+                    free(client_name);
                 }
                 else
                 {
                     // print host information and close its file descriptor
-                    getpeername(socket_descriptor, (struct sockaddr *)&address, (socklen_t *)&addrlen);
                     printf("[-]Host disconnected, IP: %s, port: %d.\n", inet_ntoa(address.sin_addr), ntohs(address.sin_port));
-
+                    registered_db(NULL, ntohs(address.sin_port), 1);
                     close(socket_descriptor);
                     client_socket[i] = 0;
                 }
@@ -257,17 +296,6 @@ int main(int argc, char **argv)
 }
 
 /*
-    File Management:
-    => PUTFILE, LISTFILES, GETFILE
-    a new table will be needed for this stage, called FILES
-    | id | file_name |
-
-    PUTFILE cv.pdf 2780 => upload files to the server, (byte option must be tested) [FINISHED]
-    LISTFILES => lists uploaded files, (works same as LISTQUESTIONS)
-    GETFILE -{id} => downloads a file from server
-*/
-
-/*
     TODO:
         BUG =>
         fix '' usage in when asking questions
@@ -275,7 +303,6 @@ int main(int argc, char **argv)
         add constants for array sizes
         delete unnecessery comments and iff add comment if it's necessery
 
-        learn more about file transfer and make it without exceeding 1024KB packet size
-            => so if a file is larger than the packet, multiple packets should be sent
-        try edge cases for PUTFILE command
+        refactor methods
+        fix printing file names after PUTFILE and GETFILE
 */

@@ -20,19 +20,18 @@
 #include <fcntl.h>
 #include <math.h>
 
-#define PORT_SIZE 5           // max size for PORT number
-#define MAX_CLIENT_NUM 10     // max number of socket descriptors
-#define TIMEOUT 600           // server timeout interval
-#define BUFF_SIZE 1024        // 1KB size of buffer
-#define DIR_SIZE 20           // size of directory path size
+#define PORT_SIZE 5       // max size for PORT number
+#define MAX_CLIENT_NUM 30 // max number of socket descriptors
+#define TIMEOUT 600       // server timeout interval
+#define BUFF_SIZE 1024    // 1KB size of buffer
+#define NAME_SIZE 15
 #define h_addr h_addr_list[0] // for backward compatibility
 #define SERVER_DB "SERVER.db" // server. db file
 
 struct timeval tv = {TIMEOUT, 0}; // sleep for 10 minutes
-
 static bool terminated = false;
 pthread_t tmp_thread;
-char commands[6][15] = {"ASK ", "ANSWER -", "LISTQUESTIONS", "PUTFILE ", "GETFILE ", "LISTFILES"};
+char commands[7][15] = {"ASK ", "ANSWER -", "LISTQUESTIONS", "PUTFILE ", "GETFILE ", "LISTFILES", "LISTUSERS"};
 
 pthread_t message_read_thread(int fd);
 pthread_t message_send_thread(int fd);
@@ -45,15 +44,16 @@ int accept_new_socket(int server_fd, struct sockaddr_in *address, socklen_t *add
 void create_db();
 void ask_db(char *buffer);
 void answer_db(char *buffer, char id);
-void listquestions_db(char *buffer, int questions);
-int send_file(int socket_fd, char *filename, char *path);
-int receive_file(int socket_fd, char *filename, char *path);
+void listquestions_db(char *buffer);
+int send_file(int socket_fd, char *filename);
+int receive_file(int socket_fd, char *filename);
 int get_file_size(char *filename);
-
 void putfile_db(char *buffer);
 void listfiles_db(char *buffer);
-
 bool file_exists(char *filename);
+void registered_db(char *client_name, int port_num, int action);
+char *get_client_name(in_port_t port_number);
+void listusers_db(char *buffer);
 
 // creates and checks creation process
 int create_and_check_socket()
@@ -152,7 +152,7 @@ void *message_read(void *vargp)
             *filename = '\0';
             strcat(path, filename + 1);
 
-            if ((receive_file(fd, path, path)) == -1)
+            if ((receive_file(fd, path)) == -1)
             {
                 printf("File could not received.\n");
             }
@@ -190,7 +190,8 @@ void *message_send(void *vargp)
                    "use 'LISTQUESTIONS' to list all questions.\n"
                    "use 'PUTFILE {file_name}' to upload a file to server.\n"
                    "use 'GETFILE -{id}' to download a file from server.\n"
-                   "use 'LISTFILES' to list all files hold by server.\n");
+                   "use 'LISTFILES' to list all files hold by server.\n"
+                   "use 'LISTUSERS' to list all active users on server.\n");
             continue;
         }
         // PUTFILE
@@ -213,7 +214,7 @@ void *message_send(void *vargp)
 
             send(fd, temp, strlen(temp) + 1, 0);
 
-            if ((send_file(fd, path, path)) == -1)
+            if ((send_file(fd, path)) == -1)
             {
                 printf("File could not send.\n");
             }
@@ -223,21 +224,9 @@ void *message_send(void *vargp)
         else if (strncmp(buffer, commands[4], strlen(commands[4])) == 0)
         {
             char path[BUFF_SIZE];
-            // strcpy(temp, buffer); temp[BUFF_SIZE],
             strcpy(path, "./local/");
 
             send(fd, buffer, strlen(buffer) + 1, 0);
-            /*
-            const char seperator = ' ';
-            char *filename = strchr(buffer, seperator);
-            *filename = '\0';
-
-            if ((receive_file(fd, filename + 1, path)) == -1)
-            {
-                printf("File could not received.\n");
-            }
-            */
-
             continue;
         }
 
@@ -252,25 +241,11 @@ void *message_send(void *vargp)
     pthread_cancel(pthread_self());
 }
 
-// takes socket FD, converts to string and appends,
-// when server gets a message, it redirects message to other clients with sender's socket FD at the end of the message
-void send_other_client(char *buffer, int sender_fd, int receiver_fd)
-{
-    char num[12];
-    char temp_arr[1025] = "Client[ ]: ";
-
-    sprintf(num, "%d", sender_fd - 4);
-    *(temp_arr + 7) = *(num + 0);
-    strcat(temp_arr, buffer);
-    send(receiver_fd, temp_arr, strlen(temp_arr) + 1, 0);
-}
-
 void create_db()
 {
     sqlite3 *db;
     int rc = sqlite3_open("SERVER.db", &db);
     char *sql1;
-    int temp;
     char *ErrMsg = 0;
 
     if (rc)
@@ -313,6 +288,23 @@ void create_db()
     else
     {
         fprintf(stdout, "Files table created successfully\n");
+    }
+
+    sql1 = "CREATE TABLE REGISTERED("
+           "ID INTEGER PRIMARY KEY,"
+           "PORT INTEGER    NOT NULL,"
+           "NAME TEXT       NOT NULL);";
+
+    rc = sqlite3_exec(db, sql1, NULL, 0, &ErrMsg);
+
+    if (rc != SQLITE_OK)
+    {
+        fprintf(stderr, "SQL error: %s\n", ErrMsg);
+        sqlite3_free(ErrMsg);
+    }
+    else
+    {
+        fprintf(stdout, "Registered table created successfully\n");
     }
 
     sqlite3_close(db);
@@ -366,17 +358,13 @@ void answer_db(char *buffer, char c)
     sqlite3_close(db);
 }
 
-void listquestions_db(char *buffer, int questions)
+void listquestions_db(char *buffer)
 {
     sqlite3 *db;
     sqlite3_stmt *res;
-    sqlite3_stmt *stmt;
-
     int rc = sqlite3_open(SERVER_DB, &db);
     int count = 0;
-    char *sql1;
     const char *tail;
-    char *ErrMsg = 0;
 
     if (rc)
     {
@@ -403,7 +391,7 @@ void listquestions_db(char *buffer, int questions)
     sqlite3_close(db);
 }
 
-int send_file(int socket_fd, char *filename, char *path)
+int send_file(int socket_fd, char *filename)
 {
     int count, total, file_size, bytes_left, sent;
     uint32_t tmp;
@@ -412,10 +400,8 @@ int send_file(int socket_fd, char *filename, char *path)
     FILE *f;
 
     strcpy(temp_filename, filename);
-    // strcat(path, filename);
 
     file_size = get_file_size(filename);
-    // printf("filesize = %d\n", file_size);
     tmp = htonl(file_size);
     send(socket_fd, &tmp, sizeof(uint32_t), 0);
 
@@ -436,14 +422,16 @@ int send_file(int socket_fd, char *filename, char *path)
         memset(send_buffer, 0, BUFF_SIZE);
     }
     fclose(f);
-    printf("[+]Uploaded %s %d\n", temp_filename, file_size);
 
+    recv(socket_fd, send_buffer, BUFF_SIZE, 0);
+    if (strcmp(send_buffer, "FIN") == 0)
+        printf("[+]Uploaded %s %d\n", temp_filename, file_size);
     return 1;
 }
 
-int receive_file(int socket_fd, char *filename, char *path)
+int receive_file(int socket_fd, char *filename)
 {
-    int count, total, bytes_left, received;
+    int count, total, received;
     uint32_t tmp, file_size;
     char temp_filename[255];
     char receive_buffer[BUFF_SIZE];
@@ -451,10 +439,8 @@ int receive_file(int socket_fd, char *filename, char *path)
 
     recv(socket_fd, &tmp, sizeof(uint32_t), 0);
     file_size = ntohl(tmp);
-    // printf("size = %d\n", file_size);
 
     strcpy(temp_filename, filename);
-    // strcat(path, filename);
 
     f = fopen(filename, "wb");
 
@@ -469,8 +455,9 @@ int receive_file(int socket_fd, char *filename, char *path)
         memset(receive_buffer, 0, BUFF_SIZE);
     }
     fclose(f);
-    printf("[+]FILE %s %d\n", temp_filename, file_size);
 
+    send(socket_fd, "FIN", strlen("FIN") + 1, 0);
+    printf("[+]FILE %s %d\n", temp_filename, file_size);
     return 1;
 }
 
@@ -480,7 +467,7 @@ int get_file_size(char *filename)
 
     if (f == NULL)
     {
-        printf("File not found.size\n");
+        printf("File not found.\n");
         return -1;
     }
 
@@ -493,35 +480,40 @@ int get_file_size(char *filename)
 
 bool file_exists(char *file_name)
 {
-    // char path[255];
     struct stat buffer;
-
-    // strcpy(path, "./local/");
-    // strcat(path, file_name);
-
     return stat(file_name, &buffer) == 0 ? true : false;
 }
 
 void putfile_db(char *buffer)
 {
     sqlite3 *db;
+    sqlite3_stmt *stmt;
     int rc = sqlite3_open(SERVER_DB, &db);
     char *sql1;
     char *ErrMsg = 0;
+    const char *tail;
 
     if (rc)
     {
         fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
     }
 
-    sql1 = sqlite3_mprintf("INSERT INTO FILES (FILENAME) VALUES('%s')", buffer);
-    rc = sqlite3_exec(db, sql1, NULL, 0, &ErrMsg);
+    sqlite3_prepare_v2(db, "SELECT * FROM FILES WHERE FILENAME=?1", 128, &stmt, &tail);
+    sqlite3_bind_text(stmt, 1, buffer, -1, SQLITE_TRANSIENT);
+    rc = sqlite3_step(stmt);
 
-    if (rc != SQLITE_OK)
+    if (rc != SQLITE_ROW)
     {
-        fprintf(stderr, "SQL error: %s\n", ErrMsg);
-        sqlite3_free(ErrMsg);
+        sql1 = sqlite3_mprintf("INSERT INTO FILES (FILENAME) VALUES('%s')", buffer);
+        rc = sqlite3_exec(db, sql1, NULL, 0, &ErrMsg);
+
+        if (rc != SQLITE_OK)
+        {
+            fprintf(stderr, "SQL error: %s\n", ErrMsg);
+            sqlite3_free(ErrMsg);
+        }
     }
+    sqlite3_finalize(stmt);
     sqlite3_close(db);
 }
 
@@ -529,11 +521,8 @@ void listfiles_db(char *buffer)
 {
     sqlite3 *db;
     sqlite3_stmt *res;
-    sqlite3_stmt *stmt;
-
     int rc = sqlite3_open(SERVER_DB, &db);
     int count = 0;
-    char *sql1;
     const char *tail;
     char *ErrMsg = 0;
 
@@ -558,6 +547,100 @@ void listfiles_db(char *buffer)
         free(temp_q);
     }
     strcat(buffer, "\nENDFILES\n");
+    sqlite3_finalize(res);
+    sqlite3_close(db);
+}
+
+void registered_db(char *client_name, int port_num, int action)
+{
+    sqlite3 *db;
+    int rc = sqlite3_open(SERVER_DB, &db);
+    char *sql1;
+    char *ErrMsg = 0;
+
+    if (rc)
+    {
+        fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
+    }
+
+    if (action == 0)
+        sql1 = sqlite3_mprintf("INSERT INTO REGISTERED (PORT, NAME) VALUES('%d', '%s')", port_num, client_name);
+    else
+        sql1 = sqlite3_mprintf("DELETE FROM REGISTERED WHERE PORT = '%d'", port_num);
+
+    rc = sqlite3_exec(db, sql1, NULL, 0, &ErrMsg);
+
+    if (rc != SQLITE_OK)
+    {
+        fprintf(stderr, "SQL error: %s\n", ErrMsg);
+        sqlite3_free(ErrMsg);
+    }
+    sqlite3_close(db);
+}
+
+char *get_client_name(in_port_t port_number)
+{
+    char *client_name = malloc(NAME_SIZE);
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+    const char *tail;
+    int rc = sqlite3_open(SERVER_DB, &db);
+    char *sql1;
+    char *ErrMsg = 0;
+
+    if (rc)
+    {
+        fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
+    }
+    rc = sqlite3_prepare_v2(db, "SELECT NAME FROM REGISTERED WHERE PORT=?1;", 128, &stmt, &tail);
+
+    if (rc != SQLITE_OK)
+    {
+        fprintf(stderr, "SQL error: %s\n", ErrMsg);
+        sqlite3_free(ErrMsg);
+    }
+    sqlite3_bind_int(stmt, 1, port_number);
+    rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW)
+    {
+        strcpy(client_name, sqlite3_column_text(stmt, 0));
+    }
+    // destroy the object to avoid resource leaks
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return client_name;
+}
+
+void listusers_db(char *buffer)
+{
+    sqlite3 *db;
+    sqlite3_stmt *res;
+    int rc = sqlite3_open(SERVER_DB, &db);
+    int count = 0;
+    const char *tail;
+    char *ErrMsg = 0;
+
+    if (rc)
+    {
+        fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
+    }
+    if (sqlite3_prepare_v2(db, "SELECT NAME FROM REGISTERED", 128, &res, &tail) != SQLITE_OK)
+    {
+        printf("Can't retrieve data: %s\n", sqlite3_errmsg(db));
+    }
+
+    size_t len = strlen(buffer);
+    size_t command_len = strlen("LISTUSERS");
+    memmove(buffer, buffer + command_len, len - command_len + 1);
+    while (sqlite3_step(res) == SQLITE_ROW)
+    {
+        count += 1;
+        char *temp_q = (char *)malloc(100 * sizeof(char));
+        sprintf(temp_q, "\n(%d) %s\n", count, sqlite3_column_text(res, 0));
+        strcat(buffer, temp_q);
+        free(temp_q);
+    }
+    strcat(buffer, "\nENDUSERS\n");
     sqlite3_finalize(res);
     sqlite3_close(db);
 }

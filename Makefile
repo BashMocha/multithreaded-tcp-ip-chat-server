@@ -10,4 +10,4 @@ client: ./src/client.c
 	gcc ${INCLUDES} ./src/client.c -o ./bin/client -lm -lsqlite3  
 
 clean:
-	rm -f ./bin/*
+	rm -f ./bin/client ./bin/server ./bin/SERVER.db
