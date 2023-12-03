@@ -1,5 +1,6 @@
-**bin/SERVER.db
-**bin/server
-**bin/client
-**bin/local/*
-**bin/remote/*
+bin/server
+bin/client
+bin/SERVER.db
+bin/local/*
+bin/remote/*
+!.gitkeep
