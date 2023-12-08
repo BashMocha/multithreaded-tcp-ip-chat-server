@@ -166,7 +166,7 @@ void *message_read(void *vargp)
     }
 }
 
-// send 1K size of message to socket FD with a thread, and terminates both threads
+// send 1K size of message packet to socket FD with a thread, and terminates both threads
 void *message_send(void *vargp)
 {
     bool disconnect = false;
@@ -213,7 +213,6 @@ void *message_send(void *vargp)
             }
 
             send(fd, temp, strlen(temp) + 1, 0);
-
             if ((send_file(fd, path)) == -1)
             {
                 printf("File could not send.\n");
@@ -391,99 +390,6 @@ void listquestions_db(char *buffer)
     sqlite3_close(db);
 }
 
-int send_file(int socket_fd, char *filename)
-{
-    int count, total, file_size, bytes_left, sent;
-    uint32_t tmp;
-    char temp_filename[255];
-    char send_buffer[BUFF_SIZE];
-    FILE *f;
-
-    strcpy(temp_filename, filename);
-
-    file_size = get_file_size(filename);
-    tmp = htonl(file_size);
-    send(socket_fd, &tmp, sizeof(uint32_t), 0);
-
-    f = fopen(filename, "rb");
-
-    total = 0;
-    bytes_left = file_size;
-    while (total < file_size)
-    {
-        sent = fread(send_buffer, 1, fmin(BUFF_SIZE, bytes_left), f);
-        count = send(socket_fd, send_buffer, fmin(BUFF_SIZE, bytes_left), 0);
-        // printf("%d\n", sent);
-
-        if (count == -1)
-            return -1;
-        total += count;
-        bytes_left -= count;
-        memset(send_buffer, 0, BUFF_SIZE);
-    }
-    fclose(f);
-
-    recv(socket_fd, send_buffer, BUFF_SIZE, 0);
-    if (strcmp(send_buffer, "FIN") == 0)
-        printf("[+]Uploaded %s %d\n", temp_filename, file_size);
-    return 1;
-}
-
-int receive_file(int socket_fd, char *filename)
-{
-    int count, total, received;
-    uint32_t tmp, file_size;
-    char temp_filename[255];
-    char receive_buffer[BUFF_SIZE];
-    FILE *f;
-
-    recv(socket_fd, &tmp, sizeof(uint32_t), 0);
-    file_size = ntohl(tmp);
-
-    strcpy(temp_filename, filename);
-
-    f = fopen(filename, "wb");
-
-    total = 0;
-    while (total < file_size)
-    {
-        received = recv(socket_fd, receive_buffer, BUFF_SIZE, 0);
-        // printf("%d\n", received);
-
-        total += received;
-        fwrite(receive_buffer, 1, received, f);
-        memset(receive_buffer, 0, BUFF_SIZE);
-    }
-    fclose(f);
-
-    send(socket_fd, "FIN", strlen("FIN") + 1, 0);
-    printf("[+]FILE %s %d\n", temp_filename, file_size);
-    return 1;
-}
-
-int get_file_size(char *filename)
-{
-    FILE *f = fopen(filename, "r");
-
-    if (f == NULL)
-    {
-        printf("File not found.\n");
-        return -1;
-    }
-
-    fseek(f, 0L, SEEK_END);
-    long int res = ftell(f);
-    fclose(f);
-
-    return res;
-}
-
-bool file_exists(char *file_name)
-{
-    struct stat buffer;
-    return stat(file_name, &buffer) == 0 ? true : false;
-}
-
 void putfile_db(char *buffer)
 {
     sqlite3 *db;
@@ -578,39 +484,6 @@ void registered_db(char *client_name, int port_num, int action)
     sqlite3_close(db);
 }
 
-char *get_client_name(in_port_t port_number)
-{
-    char *client_name = malloc(NAME_SIZE);
-    sqlite3 *db;
-    sqlite3_stmt *stmt;
-    const char *tail;
-    int rc = sqlite3_open(SERVER_DB, &db);
-    char *sql1;
-    char *ErrMsg = 0;
-
-    if (rc)
-    {
-        fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
-    }
-    rc = sqlite3_prepare_v2(db, "SELECT NAME FROM REGISTERED WHERE PORT=?1;", 128, &stmt, &tail);
-
-    if (rc != SQLITE_OK)
-    {
-        fprintf(stderr, "SQL error: %s\n", ErrMsg);
-        sqlite3_free(ErrMsg);
-    }
-    sqlite3_bind_int(stmt, 1, port_number);
-    rc = sqlite3_step(stmt);
-    if (rc == SQLITE_ROW)
-    {
-        strcpy(client_name, sqlite3_column_text(stmt, 0));
-    }
-    // destroy the object to avoid resource leaks
-    sqlite3_finalize(stmt);
-    sqlite3_close(db);
-    return client_name;
-}
-
 void listusers_db(char *buffer)
 {
     sqlite3 *db;
@@ -643,6 +516,137 @@ void listusers_db(char *buffer)
     strcat(buffer, "\nENDUSERS\n");
     sqlite3_finalize(res);
     sqlite3_close(db);
+}
+
+int send_file(int socket_fd, char *filename)
+{
+    int count, total, file_size, bytes_left, sent;
+    uint32_t tmp;
+    char temp_filename[255];
+    char send_buffer[BUFF_SIZE];
+    FILE *f;
+
+    strcpy(temp_filename, filename);
+
+    file_size = get_file_size(filename);
+    tmp = htonl(file_size);
+    send(socket_fd, &tmp, sizeof(uint32_t), 0);
+
+    f = fopen(filename, "rb");
+
+    total = 0;
+    bytes_left = file_size;
+    while (total < file_size)
+    {
+        // sends either 1K or less than 1K sized packets
+        // the last packet size is generally less than 1K
+        sent = fread(send_buffer, 1, fmin(BUFF_SIZE, bytes_left), f);
+        count = send(socket_fd, send_buffer, fmin(BUFF_SIZE, bytes_left), 0);
+        // printf("%d\n", sent);
+
+        if (count == -1)
+            return -1;
+        total += count;
+        bytes_left -= count;
+        memset(send_buffer, 0, BUFF_SIZE);
+    }
+    fclose(f);
+
+    // if FIN message received, than the transfer is successful
+    recv(socket_fd, send_buffer, BUFF_SIZE, 0);
+    if (strcmp(send_buffer, "FIN") == 0)
+        printf("[+]Uploaded %s %d\n", temp_filename, file_size);
+    return 1;
+}
+
+int receive_file(int socket_fd, char *filename)
+{
+    int count, total, received;
+    uint32_t tmp, file_size;
+    char temp_filename[255];
+    char receive_buffer[BUFF_SIZE];
+    FILE *f;
+
+    recv(socket_fd, &tmp, sizeof(uint32_t), 0);
+    file_size = ntohl(tmp);
+
+    strcpy(temp_filename, filename);
+
+    f = fopen(filename, "wb");
+
+    total = 0;
+    while (total < file_size)
+    {
+        received = recv(socket_fd, receive_buffer, BUFF_SIZE, 0);
+        // printf("%d\n", received);
+
+        total += received;
+        fwrite(receive_buffer, 1, received, f);
+        memset(receive_buffer, 0, BUFF_SIZE);
+    }
+    fclose(f);
+
+    // if received then, sends a FIN message to end the connection
+    send(socket_fd, "FIN", strlen("FIN") + 1, 0);
+    printf("[+]FILE %s %d\n", temp_filename, file_size);
+    return 1;
+}
+
+int get_file_size(char *filename)
+{
+    FILE *f = fopen(filename, "r");
+
+    if (f == NULL)
+    {
+        printf("File not found.\n");
+        return -1;
+    }
+
+    fseek(f, 0L, SEEK_END);
+    long int res = ftell(f);
+    fclose(f);
+
+    return res;
+}
+
+bool file_exists(char *file_name)
+{
+    struct stat buffer;
+    return stat(file_name, &buffer) == 0 ? true : false;
+}
+
+
+char *get_client_name(in_port_t port_number)
+{
+    char *client_name = malloc(NAME_SIZE);
+    sqlite3 *db;
+    sqlite3_stmt *stmt;
+    const char *tail;
+    int rc = sqlite3_open(SERVER_DB, &db);
+    char *sql1;
+    char *ErrMsg = 0;
+
+    if (rc)
+    {
+        fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
+    }
+    rc = sqlite3_prepare_v2(db, "SELECT NAME FROM REGISTERED WHERE PORT=?1;", 128, &stmt, &tail);
+
+    if (rc != SQLITE_OK)
+    {
+        fprintf(stderr, "SQL error: %s\n", ErrMsg);
+        sqlite3_free(ErrMsg);
+    }
+    sqlite3_bind_int(stmt, 1, port_number);
+    rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW)
+    {
+        strcpy(client_name, sqlite3_column_text(stmt, 0));
+    }
+    // destroy the object to avoid resource leaks
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return client_name;
 }
 
 #endif
