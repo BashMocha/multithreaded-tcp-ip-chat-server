@@ -1,4 +1,4 @@
-# Classroom Chat Server
+# TCP/IP Classroom Server
 > Multithreaded server-client application where multiple clients can send text and files via server
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
