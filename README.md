@@ -81,7 +81,7 @@ There are several defined commands for the utilities. Each of the commands is de
 ```
 - use `ANSWER` to answer a question.
 ```shell
-  ANSWER it's Afonso I  
+  ANSWER it is Afonso I  
 ```
 - use `LISTQUESTIONS` to list all questions.
 ```shell
