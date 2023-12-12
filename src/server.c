@@ -294,15 +294,3 @@ int main(int argc, char **argv)
     shutdown(server_fd, SHUT_RDWR);
     return 0;
 }
-
-/*
-    TODO:
-        BUG =>
-        fix '' usage in when asking questions
-
-        add constants for array sizes
-        delete unnecessery comments and iff add comment if it's necessery
-
-        refactor methods
-        fix printing file names after PUTFILE and GETFILE
-*/
