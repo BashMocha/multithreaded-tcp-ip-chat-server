@@ -21,7 +21,7 @@ The project aims to help students to develop the idea of how client-server appli
 Where students are able to join a server within the same port that the server uses, send texts to each other, ask/answer questions, and send/receive files. 
 
 # Features
-- The whole implementation runs under TCP/IP protocol.
+- The whole implementation runs under TCP/IP protocol and on `localhost`.
 - Server supports multi-clients up to 30. This can be modified via `MAX_CLIENT_NUM` in `util.h`.
 - Server supports database functionality with SQLite3. Check out the [Prerequisities](#prerequisities).
 - Server takes time for timeout. During the inactivity of 10 minutes, the server shuts itself. This can be modified via `TIMEOUT` in `util.h`.
@@ -49,6 +49,10 @@ To verify the installation, check the software’s version:
 Or you can check the official [Downloads](https://www.sqlite.org/download.html) page to install the source code.
 
 # Usage
+> [!WARNING]
+> The whole project runs on `localhost` and has not been tested on distinct machines.
+> Trying to run the server and clients on different machines can cause fatal errors and crash the program entirely.
+
 > [!WARNING]
 > `./bin`, `./bin/local` and `./bin/remote` folders are crucial for the project functionality
 > especially for the database and file transfer functions.
